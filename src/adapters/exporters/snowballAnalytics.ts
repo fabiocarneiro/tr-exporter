@@ -8,8 +8,10 @@ import {
   CashTransaction,
   OrderTransaction,
   Portfolio,
-  CorporateActionTransaction,
   IsinChangeTransaction,
+  StockSplitTransaction,
+  CapitalIncreaseTransaction,
+  CapitalReductionTransaction,
   TRANSACTION_TYPE,
 } from '@/domain/portfolio';
 import { TRANSACTION_EVENT_TYPE } from '@/domain/constants';
@@ -294,32 +296,31 @@ class SnowballAnalyticsExporter {
     ];
   }
 
-  private async handleCorporateActionTransaction(
-    item: CorporateActionTransaction,
+  private async handleStockSplitTransaction(
+    item: StockSplitTransaction,
   ): Promise<CsvRowData> {
     const { isin, currency } = await this.getRemapFromIsin(item.isin);
+    return {
+      event: EVENT_TYPE_SPLIT,
+      date: item.date,
+      symbol: isin,
+      exchange: '',
+      note: item.title,
+      quantity: DISABLED_PRICE_FOR_SPLIT,
+      price: parseToBigNumber(item.creditedShares)
+        .dividedBy(parseToBigNumber(item.debitedShares))
+        .toFixed(),
+      currency,
+      feeTax: '',
+      feeCurrency: '',
+      doNotAdjustCash: '',
+    };
+  }
 
-    if (
-      parseToBigNumber(item.debitedShares).isGreaterThan(0) &&
-      parseToBigNumber(item.creditedShares).isGreaterThan(0)
-    ) {
-      return {
-        event: EVENT_TYPE_SPLIT,
-        date: item.date,
-        symbol: isin,
-        exchange: '',
-        note: item.title,
-        quantity: DISABLED_PRICE_FOR_SPLIT,
-        price: parseToBigNumber(item.creditedShares)
-          .dividedBy(parseToBigNumber(item.debitedShares))
-          .toFixed(),
-        currency,
-        feeTax: '',
-        feeCurrency: '',
-        doNotAdjustCash: '',
-      };
-    }
-
+  private async handleCapitalIncreaseTransaction(
+    item: CapitalIncreaseTransaction,
+  ): Promise<CsvRowData> {
+    const { isin, currency } = await this.getRemapFromIsin(item.isin);
     return {
       event: EVENT_TYPE_STOCK_AS_DIVIDEND,
       date: item.date,
@@ -332,6 +333,25 @@ class SnowballAnalyticsExporter {
       feeTax: '',
       feeCurrency: '',
       doNotAdjustCash: '',
+    };
+  }
+
+  private async handleCapitalReductionTransaction(
+    item: CapitalReductionTransaction,
+  ): Promise<CsvRowData> {
+    const { isin } = await this.getRemapFromIsin(item.isin);
+    return {
+      event: EVENT_TYPE_SELL,
+      date: item.date,
+      symbol: isin,
+      exchange: '',
+      note: item.title,
+      quantity: item.debitedShares,
+      price: '0',
+      currency: DEFAULT_CURRENCY,
+      feeTax: '',
+      feeCurrency: '',
+      doNotAdjustCash: '1',
     };
   }
 
@@ -362,12 +382,29 @@ class SnowballAnalyticsExporter {
         return [this.handleCashTransaction(item)];
       }
 
-      if (item.eventType === TRANSACTION_EVENT_TYPE.CORPORATE_ACTION) {
-        return [await this.handleCorporateActionTransaction(item)];
+      if (item.eventType === TRANSACTION_EVENT_TYPE.STOCK_SPLIT) {
+        return [await this.handleStockSplitTransaction(item)];
+      }
+
+      if (item.eventType === TRANSACTION_EVENT_TYPE.CAPITAL_INCREASE) {
+        return [await this.handleCapitalIncreaseTransaction(item)];
+      }
+
+      if (item.eventType === TRANSACTION_EVENT_TYPE.CAPITAL_REDUCTION) {
+        return [await this.handleCapitalReductionTransaction(item)];
       }
 
       if (item.eventType === TRANSACTION_EVENT_TYPE.ISIN_CHANGE) {
         return await this.handleIsinChangeTransaction(item);
+      }
+
+      // Informational corporate action types carry no financial data — skip CSV output
+      if (
+        item.eventType === TRANSACTION_EVENT_TYPE.DIVIDEND_NOTIFICATION ||
+        item.eventType === TRANSACTION_EVENT_TYPE.DIVIDEND_ELECTION ||
+        item.eventType === TRANSACTION_EVENT_TYPE.INFORMATIONAL_NOTICE
+      ) {
+        return null;
       }
 
       return null;

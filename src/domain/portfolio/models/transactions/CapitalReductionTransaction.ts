@@ -1,10 +1,9 @@
 import { TRANSACTION_EVENT_TYPE } from '@/domain/constants';
 
-export interface CorporateActionTransaction {
+export interface CapitalReductionTransaction {
   title: string;
-  eventType: TRANSACTION_EVENT_TYPE.CORPORATE_ACTION;
+  eventType: TRANSACTION_EVENT_TYPE.CAPITAL_REDUCTION;
   date: string;
   isin: string;
-  creditedShares: string;
   debitedShares: string;
 }

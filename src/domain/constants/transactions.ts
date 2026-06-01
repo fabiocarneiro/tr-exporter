@@ -10,8 +10,14 @@ export enum TRANSACTION_EVENT_TYPE {
   RECEIVED_GIFT = 'Received Gift', // Received stock gifts from a friend (received gifts aren't included in transactions list and are added later from activities)
   WELCOME_STOCK_GIFT = 'Welcome Stock Gift', // Welcome stock gifts when opening an account
   GIVE_AWAY_GIFT = 'Give Away Gift', // Give away stock gifts from Trade Republic
-  CORPORATE_ACTION = 'Corporate Action', // Corporate actions that change the number of shares held
-  ISIN_CHANGE = 'ISIN Change', // Corporate events that replace one ISIN with another (e.g. reverse splits)
+  CORPORATE_ACTION = 'Corporate Action', // routing value from TR data — never stored in portfolio output
+  ISIN_CHANGE = 'ISIN Change', // title exchange: one ISIN replaced by another
+  STOCK_SPLIT = 'Stock Split', // stock split or reverse split (shares added and removed)
+  CAPITAL_INCREASE = 'Capital Increase', // shares credited with no corresponding debit
+  CAPITAL_REDUCTION = 'Capital Reduction', // shares debited with no corresponding credit
+  DIVIDEND_NOTIFICATION = 'Dividend Notification', // informational cash dividend announcement (actual payment recorded as Dividend)
+  DIVIDEND_ELECTION = 'Dividend Election', // pending cash-or-stock dividend choice
+  INFORMATIONAL_NOTICE = 'Informational Notice', // generic informational corporate action (e.g. bankruptcy notice)
 
   // Non-portfolio-related transactions
   SENT_GIFT = 'Sent Gift', // Sent stock gifts to a friend
