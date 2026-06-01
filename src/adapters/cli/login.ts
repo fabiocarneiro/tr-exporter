@@ -5,22 +5,10 @@ import {
   TradeRepublicApiLoginProcessError,
 } from '@/adapters/tr';
 import { getPhoneNumber } from '@/adapters/cli/phoneNumberStorage';
+import { startSpinner } from '@/adapters/cli/spinner';
 
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 120000;
-const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
-function startSpinner(message: string): () => void {
-  let frame = 0;
-  const interval = setInterval(() => {
-    process.stdout.write(`\r${SPINNER_FRAMES[frame]} ${message}`);
-    frame = (frame + 1) % SPINNER_FRAMES.length;
-  }, 80);
-  return () => {
-    clearInterval(interval);
-    process.stdout.write('\r\x1b[K'); // clear the spinner line
-  };
-}
 
 export async function login(): Promise<boolean> {
   console.log('Starting Trade Republic login process...');
