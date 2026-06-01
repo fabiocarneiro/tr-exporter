@@ -103,12 +103,6 @@ export async function login(): Promise<boolean> {
             code,
           );
           authenticatorCodeSubmitted = true;
-          appApprovalMessageShown = true;
-          console.log(
-            'Please approve the login request in your Trade Republic app...',
-          );
-          stopSpinner = startSpinner('Waiting for app approval...');
-          continue;
         }
 
         if (!appApprovalMessageShown) {
