@@ -51,16 +51,24 @@ export const handleConvertTransactionsToPortfolio = async (): Promise<void> => {
       transactions,
       phoneNumber,
     );
-    const portfolioData = mapTransactionsToPortfolioData(restamped);
+    const { portfolio, unsupported } =
+      mapTransactionsToPortfolioData(restamped);
 
-    const filePath = path.join(
-      process.cwd(),
-      'build',
-      phoneNumber,
-      'portfolioData.json',
+    const dir = path.join(process.cwd(), 'build', phoneNumber);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'portfolioData.json'),
+      JSON.stringify(portfolio, null, 2),
     );
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(portfolioData, null, 2));
+
+    if (unsupported.length > 0) {
+      const unsupportedPath = path.join(dir, 'unsupportedTransactions.json');
+      fs.writeFileSync(unsupportedPath, JSON.stringify(unsupported, null, 2));
+      consola.warn(
+        `${unsupported.length} unsupported transaction(s) written to ${unsupportedPath}. Please report this at https://github.com/DanielFerrariR/tr-exporter/issues`,
+      );
+    }
+
     consola.info('Portfolio data generated successfully.');
   } catch (error) {
     consola.error('Error converting transactions to portfolio data:', error);

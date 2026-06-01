@@ -11,22 +11,21 @@ import {
   CashTransaction,
   OrderTransaction,
   Portfolio,
-  CorporateActionTransaction,
   IsinChangeTransaction,
+  StockSplitTransaction,
+  CapitalIncreaseTransaction,
+  CapitalReductionTransaction,
+  DividendNotificationTransaction,
+  DividendElectionTransaction,
+  InformationalNoticeTransaction,
   TRANSACTION_TYPE,
 } from './index';
 import { identifyBuyOrSell } from '@/domain/classification/identifyBuyOrSell';
 import { parseToBigNumber } from '@/domain/portfolio/parseToBigNumber';
 
-/** A corporate action record that carries no financial data for the portfolio —
- * e.g. dividend election notices, cash dividend summaries that are already
- * recorded as a separate Dividend transaction, or informational notices. */
-type InformationalCorporateAction = {
-  eventType: 'informational_corporate_action';
-};
-const INFORMATIONAL_CORPORATE_ACTION: InformationalCorporateAction = {
-  eventType: 'informational_corporate_action',
-};
+const CA_HEADER_DIVIDEND_NOTIFICATION = 'Cash dividend';
+const CA_HEADER_DIVIDEND_ELECTION = 'You have an upcoming dividend payment';
+const CA_HEADER_INFORMATIONAL_NOTICE = 'You received a corporate action';
 
 const DEFAULT_EXCHANGE = 'LSX';
 const DEFAULT_CURRENCY = 'EUR';
@@ -472,13 +471,14 @@ const handleCorporateAction = (
   transaction: EnrichedTransaction,
   isinChangeMap: Map<string, string>,
 ):
-  | CorporateActionTransaction
-  | CashTransaction
   | IsinChangeTransaction
-  | InformationalCorporateAction => {
-  if (!transaction.eventType) {
-    throw new Error('Transaction eventType is required');
-  }
+  | StockSplitTransaction
+  | CapitalIncreaseTransaction
+  | CapitalReductionTransaction
+  | CashTransaction
+  | DividendNotificationTransaction
+  | DividendElectionTransaction
+  | InformationalNoticeTransaction => {
   const date = extractDate(transaction.timestamp);
   let isin = extractIsinFromIcon(transaction.icon);
 
@@ -486,6 +486,8 @@ const handleCorporateAction = (
   if (isin === 'timeline_refresh') {
     isin = transaction.title;
   }
+
+  const headerSection = findHeaderSection(transaction.sections);
 
   // Overview section format: used by split events (stock splits, reverse splits)
   const overviewSection = findTableSection(
@@ -500,10 +502,10 @@ const handleCorporateAction = (
     : undefined;
 
   if (overviewSection && overviewSharesAdded && overviewSharesRemoved) {
-    const sharesAdded = parseToBigNumber(
+    const creditedShares = parseToBigNumber(
       getDetailText(overviewSharesAdded),
     ).toFixed();
-    const sharesRemoved = parseToBigNumber(
+    const debitedShares = parseToBigNumber(
       getDetailText(overviewSharesRemoved),
     ).toFixed();
 
@@ -515,19 +517,18 @@ const handleCorporateAction = (
         date,
         oldIsin: isin,
         newIsin,
-        oldShares: sharesRemoved,
-        newShares: sharesAdded,
+        oldShares: debitedShares,
+        newShares: creditedShares,
       };
     }
 
     return {
-      title: `${transaction.title} - Corporate Action`,
-      eventType:
-        transaction.eventType as TRANSACTION_EVENT_TYPE.CORPORATE_ACTION,
+      title: transaction.title,
+      eventType: TRANSACTION_EVENT_TYPE.STOCK_SPLIT,
       date,
       isin,
-      creditedShares: sharesAdded,
-      debitedShares: sharesRemoved,
+      creditedShares,
+      debitedShares,
     };
   }
 
@@ -537,7 +538,34 @@ const handleCorporateAction = (
   );
 
   if (!transactionSection) {
-    return INFORMATIONAL_CORPORATE_ACTION;
+    const headerTitle = headerSection?.title ?? '';
+    if (headerTitle === CA_HEADER_DIVIDEND_NOTIFICATION) {
+      return {
+        title: transaction.title,
+        eventType: TRANSACTION_EVENT_TYPE.DIVIDEND_NOTIFICATION,
+        date,
+        isin,
+      };
+    }
+    if (headerTitle === CA_HEADER_DIVIDEND_ELECTION) {
+      return {
+        title: transaction.title,
+        eventType: TRANSACTION_EVENT_TYPE.DIVIDEND_ELECTION,
+        date,
+        isin,
+      };
+    }
+    if (headerTitle === CA_HEADER_INFORMATIONAL_NOTICE) {
+      return {
+        title: transaction.title,
+        eventType: TRANSACTION_EVENT_TYPE.INFORMATIONAL_NOTICE,
+        date,
+        isin,
+      };
+    }
+    throw new Error(
+      `Unsupported corporate action format (header: "${headerTitle}"): ${transaction.id}`,
+    );
   }
 
   const creditedShares = parseToBigNumber(
@@ -553,7 +581,6 @@ const handleCorporateAction = (
 
   // Detect ISIN change via header section icon (fallback for events where TR
   // exposes the new ISIN directly in the detail header).
-  const headerSection = findHeaderSection(transaction.sections);
   const rawHeaderIcon = headerSection?.data?.icon;
   if (rawHeaderIcon) {
     const headerIconStr =
@@ -599,27 +626,57 @@ const handleCorporateAction = (
     };
   }
 
-  return {
-    title: transaction.title,
-    eventType: transaction.eventType as TRANSACTION_EVENT_TYPE.CORPORATE_ACTION,
-    date,
-    isin,
-    creditedShares,
-    debitedShares,
-  };
+  const credited = parseToBigNumber(creditedShares);
+  const debited = parseToBigNumber(debitedShares);
+
+  if (credited.isGreaterThan(0) && debited.isGreaterThan(0)) {
+    return {
+      title: transaction.title,
+      eventType: TRANSACTION_EVENT_TYPE.STOCK_SPLIT,
+      date,
+      isin,
+      creditedShares,
+      debitedShares,
+    };
+  }
+
+  if (credited.isGreaterThan(0)) {
+    return {
+      title: transaction.title,
+      eventType: TRANSACTION_EVENT_TYPE.CAPITAL_INCREASE,
+      date,
+      isin,
+      creditedShares,
+    };
+  }
+
+  if (debited.isGreaterThan(0)) {
+    return {
+      title: transaction.title,
+      eventType: TRANSACTION_EVENT_TYPE.CAPITAL_REDUCTION,
+      date,
+      isin,
+      debitedShares,
+    };
+  }
+
+  throw new Error(
+    `Unsupported corporate action format (zero shares, header: "${headerSection?.title ?? ''}"): ${transaction.id}`,
+  );
 };
 
 export const mapTransactionsToPortfolioData = (
   transactions: EnrichedTransaction[],
-): Portfolio => {
+): { portfolio: Portfolio; unsupported: EnrichedTransaction[] } => {
   if (!transactions?.length) {
     console.warn(
       'No data provided to convert to Portfolio. No file will be created.',
     );
-    return [];
+    return { portfolio: [], unsupported: [] };
   }
 
   const portfolioData: Portfolio = [];
+  const unsupported: EnrichedTransaction[] = [];
   const isinChangeMap = resolveIsinChanges(transactions);
 
   for (const transaction of transactions) {
@@ -672,18 +729,9 @@ export const mapTransactionsToPortfolioData = (
           break;
 
         case TRANSACTION_EVENT_TYPE.CORPORATE_ACTION:
-        case TRANSACTION_EVENT_TYPE.ISIN_CHANGE: {
-          const corporateActionResult = handleCorporateAction(
-            transaction,
-            isinChangeMap,
-          );
-          if (
-            corporateActionResult.eventType !== 'informational_corporate_action'
-          ) {
-            portfolioData.push(corporateActionResult);
-          }
+        case TRANSACTION_EVENT_TYPE.ISIN_CHANGE:
+          portfolioData.push(handleCorporateAction(transaction, isinChangeMap));
           break;
-        }
 
         default:
           // Unhandled event types are silently ignored
@@ -694,9 +742,9 @@ export const mapTransactionsToPortfolioData = (
         `Error processing transaction ${transaction.id} (${transaction.title}):`,
         error instanceof Error ? error.message : String(error),
       );
-      // Continue processing other transactions even if one fails
+      unsupported.push(transaction);
     }
   }
 
-  return portfolioData;
+  return { portfolio: portfolioData, unsupported };
 };
